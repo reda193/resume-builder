@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/resume/v1.json",
+  "title": "Resume",
+  "description": "Template-independent resume data. All text is plain text (no LaTeX, no Markdown); the renderer escapes it. Templates ignore fields they don't display. Length limits keep single fields inside Jake's fixed-width headings, but combinations can still overflow: the build step must also reject LaTeX 'Overfull \\\\hbox' warnings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "basics",
+    "section_order"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "basics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/text",
+          "maxLength": 40
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "pattern": "^[^\\s\\\\{}%#]+@[^\\s\\\\{}%#]+$",
+          "maxLength": 80
+        },
+        "phone": {
+          "$ref": "#/$defs/text",
+          "maxLength": 30
+        },
+        "location": {
+          "$ref": "#/$defs/text",
+          "maxLength": 50,
+          "description": "City, region. Not shown by the Jake template."
+        },
+        "summary": {
+          "$ref": "#/$defs/text",
+          "maxLength": 500,
+          "description": "Not shown by the Jake template."
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/link"
+          }
+        }
+      }
+    },
+    "section_order": {
+      "description": "Order sections appear in. Each section appears at most once. Templates skip sections they don't support and sections with no entries.",
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "summary",
+          "education",
+          "experience",
+          "projects",
+          "skills"
+        ]
+      }
+    },
+    "education": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/education"
+      }
+    },
+    "experience": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/company"
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/project"
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/skill_group"
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "description": "Plain single-line text. No control characters or line breaks.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "date": {
+      "description": "Date as it should appear, with abbreviated months: \"Aug. 2018\", \"Sept. 2021\", \"2021\", \"Summer 2019\", \"Present\". Max 12 characters so date ranges fit beside titles.",
+      "$ref": "#/$defs/text",
+      "maxLength": 12
+    },
+    "bullet": {
+      "$ref": "#/$defs/text",
+      "maxLength": 220
+    },
+    "url": {
+      "description": "Full http(s) URL. Characters that break LaTeX links are not allowed.",
+      "type": "string",
+      "pattern": "^https?://[^\\s\\\\{}]+$",
+      "maxLength": 200
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/url"
+        },
+        "label": {
+          "$ref": "#/$defs/text",
+          "maxLength": 50,
+          "description": "Optional display text. If absent, derived from the URL (scheme, www. and trailing slash removed)."
+        }
+      }
+    },
+    "education": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "school"
+      ],
+      "properties": {
+        "school": {
+          "$ref": "#/$defs/text",
+          "maxLength": 60
+        },
+        "location": {
+          "$ref": "#/$defs/text",
+          "maxLength": 32
+        },
+        "degree": {
+          "$ref": "#/$defs/text",
+          "maxLength": 75
+        },
+        "start": {
+          "$ref": "#/$defs/date"
+        },
+        "end": {
+          "$ref": "#/$defs/date"
+        },
+        "details": {
+          "description": "Optional extras: GPA, honours, relevant coursework.",
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/bullet"
+          }
+        }
+      }
+    },
+    "company": {
+      "description": "One employer. Several roles at the same employer go in roles, most recent first. Separate stints at the same employer that the resume lists separately stay as separate entries.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "company",
+        "roles"
+      ],
+      "properties": {
+        "company": {
+          "$ref": "#/$defs/text",
+          "maxLength": 55
+        },
+        "location": {
+          "$ref": "#/$defs/text",
+          "maxLength": 32
+        },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/role"
+          }
+        }
+      }
+    },
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/text",
+          "maxLength": 55
+        },
+        "start": {
+          "$ref": "#/$defs/date"
+        },
+        "end": {
+          "$ref": "#/$defs/date"
+        },
+        "bullets": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/bullet"
+          }
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/text",
+          "maxLength": 40
+        },
+        "tech": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/text",
+            "maxLength": 20
+          }
+        },
+        "link": {
+          "$ref": "#/$defs/url"
+        },
+        "start": {
+          "$ref": "#/$defs/date"
+        },
+        "end": {
+          "$ref": "#/$defs/date"
+        },
+        "bullets": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/bullet"
+          }
+        }
+      }
+    },
+    "skill_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "items"
+      ],
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/text",
+          "maxLength": 30
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 15,
+          "items": {
+            "$ref": "#/$defs/text",
+            "maxLength": 40
+          }
+        }
+      }
+    }
+  }
+}

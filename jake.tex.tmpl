@@ -1,0 +1,252 @@
+<<- /*
+  Jake's Resume, fill-in version.
+  Engine: Go text/template with custom delimiters "<<" and ">>"
+          (Jake's template uses square brackets and braces, so the defaults can't be used).
+  Data:   JSON matching resume.schema.json, decoded into map[string]any
+          (so field names here are exactly the schema's names).
+
+  The renderer must register these functions:
+    tex       escape any value as LaTeX text (nil -> ""). EVERY text value goes through it.
+    href      escape a URL for use inside \href{...} (escapes %, # and &).
+    linktext  display text for a URL: strips http(s)://, www. and a trailing slash.
+
+  Build: pdflatex twice, with -no-shell-escape. Treat any "Overfull \hbox" warning
+         over ~1pt in the log as a failed build (a heading line ran past the margin).
+
+  Rules for editing this file:
+    - Never print a value without tex (or href for URLs).
+    - The preamble is identical to the original template except for the two
+      font-encoding lines marked CHANGED below.
+*/ ->>
+%-------------------------
+% Resume in Latex
+% Author : Jake Gutierrez
+% Based off of: https://github.com/sb2nov/resume
+% License : MIT
+%------------------------
+
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+% CHANGED from the original: T1 encoding + Latin Modern (a digital remake of the
+% same Computer Modern font, so it looks the same). The original's OT1 encoding
+% draws _ as a line and mangles < > | ~ ^ " in extracted text, which breaks
+% email addresses and keywords for ATS parsers.
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\input{glyphtounicode}
+
+
+%----------FONT OPTIONS----------
+% sans-serif
+% \usepackage[sfdefault]{FiraSans}
+% \usepackage[sfdefault]{roboto}
+% \usepackage[sfdefault]{noto-sans}
+% \usepackage[default]{sourcesanspro}
+
+% serif
+% \usepackage{CormorantGaramond}
+% \usepackage{charter}
+
+
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Adjust margins
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Sections formatting
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+% Ensure that generate pdf is machine readable/ATS parsable
+\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\begin{document}
+
+%----------HEADING----------
+\begin{center}
+    \textbf{\Huge \scshape <<tex .basics.name>>} \\ \vspace{1pt}
+    \small <<template "contact" .basics>>
+\end{center}
+
+<<range .section_order>>
+<<- if eq . "education">><<template "education" $>>
+<<- else if eq . "experience">><<template "experience" $>>
+<<- else if eq . "projects">><<template "projects" $>>
+<<- else if eq . "skills">><<template "skills" $>>
+<<- end>>
+<<- end>>
+
+%-------------------------------------------
+\end{document}
+<<- /* ===================== Sub-templates (produce no output here) ===================== */ ->>
+
+<<- /* Contact line: phone | email | links, with separators only between items. */ ->>
+<<define "contact">>
+<<- $sep := false>>
+<<- if .phone>><<tex .phone>><<$sep = true>><<end>>
+<<- if .email>><<if $sep>> $|$ <<end>>\href{mailto:<<href .email>>}{\underline{<<tex .email>>}}<<$sep = true>><<end>>
+<<- range .links>><<if $sep>> $|$ <<end>>\href{<<href .url>>}{\underline{<<if .label>><<tex .label>><<else>><<tex (linktext .url)>><<end>>}}<<$sep = true>><<end>>
+<<- end>>
+
+<<- /* "Aug. 2018 -- May 2021", or just one side if the other is missing. */ ->>
+<<define "dates">>
+<<- tex .start>><<if and .start .end>> -- <<end>><<tex .end>>
+<<- end>>
+
+<<- /* Bullet list. Emits nothing at all when empty (an empty itemize is a LaTeX error). */ ->>
+<<define "bullets">>
+<<- if .>>
+      \resumeItemListStart
+<<- range .>>
+        \resumeItem{<<tex .>>}
+<<- end>>
+      \resumeItemListEnd
+<<- end>>
+<<- end>>
+
+<<- /* Education: \resumeSubheading{school}{location}{degree}{dates} */ ->>
+<<define "education">>
+<<- if .education>>
+%-----------EDUCATION-----------
+\section{Education}
+  \resumeSubHeadingListStart
+<<- range .education>>
+    \resumeSubheading
+      {<<tex .school>>}{<<tex .location>>}
+      {<<tex .degree>>}{<<template "dates" .>>}
+<<- template "bullets" .details>>
+<<- end>>
+  \resumeSubHeadingListEnd
+
+<<end>>
+<<- end>>
+
+<<- /* Experience: first role  -> \resumeSubheading{title}{dates}{company}{location}
+                   extra roles -> \resumeSubSubheading{title}{dates}
+     Note the field order differs from Education. */ ->>
+<<define "experience">>
+<<- if .experience>>
+%-----------EXPERIENCE-----------
+\section{Experience}
+  \resumeSubHeadingListStart
+<<- range .experience>>
+<<- $co := .>>
+<<- with index .roles 0>>
+    \resumeSubheading
+      {<<tex .title>>}{<<template "dates" .>>}
+      {<<tex $co.company>>}{<<tex $co.location>>}
+<<- template "bullets" .bullets>>
+<<- end>>
+<<- range slice .roles 1>>
+    \resumeSubSubheading
+      {<<tex .title>>}{<<template "dates" .>>}
+<<- template "bullets" .bullets>>
+<<- end>>
+<<- end>>
+  \resumeSubHeadingListEnd
+
+<<end>>
+<<- end>>
+
+<<- /* Projects: \resumeProjectHeading{\textbf{name} $|$ \emph{tech, tech}}{dates}
+     The name becomes a (hidden) link when the project has one. */ ->>
+<<define "projects">>
+<<- if .projects>>
+%-----------PROJECTS-----------
+\section{Projects}
+    \resumeSubHeadingListStart
+<<- range .projects>>
+      \resumeProjectHeading
+          {<<if .link>>\href{<<href .link>>}{\textbf{<<tex .name>>}}<<else>>\textbf{<<tex .name>>}<<end>>
+          <<- if .tech>> $|$ \emph{<<range $i, $t := .tech>><<if $i>>, <<end>><<tex $t>><<end>>}<<end>>}{<<template "dates" .>>}
+<<- template "bullets" .bullets>>
+<<- end>>
+    \resumeSubHeadingListEnd
+
+<<end>>
+<<- end>>
+
+<<- /* Skills: one line per category, "\\" between lines but not after the last. */ ->>
+<<define "skills">>
+<<- if .skills>>
+%-----------PROGRAMMING SKILLS-----------
+\section{Technical Skills}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+<<- range $i, $g := .skills>><<if $i>> \\<<end>>
+     \textbf{<<tex $g.category>>}{: <<range $j, $s := $g.items>><<if $j>>, <<end>><<tex $s>><<end>>}
+<<- end>>
+    }}
+ \end{itemize}
+
+<<end>>
+<<- end>>

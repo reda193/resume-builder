@@ -1,0 +1,6 @@
+*.aux
+*.log
+*.out
+*.pdf
+jake-ryan.tex
+out.tex
