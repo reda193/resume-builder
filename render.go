@@ -37,13 +37,20 @@ func main() {
 	fmt.Println(basics["name"])
 	tmpl, err := template.New("test").
 		Delims("<<", ">>").
-		Funcs(template.FuncMap{"tex": tex}).
-		Parse("Hello <<tex .basics.name>>, from <<tex \"R&D\">>\n")
+		Funcs(template.FuncMap{
+			"tex":      tex,
+			"href":     href,
+			"linktext": linktext}).
+		Option("missingkey=zero").
+		Parse("Phone: <<tex .basics.phone>>, Fax: <<tex .basics.fax>>\n")
 	err = tmpl.Execute(os.Stdout, result)
 	if err != nil {
 		fmt.Println("Error filling template:", err)
 		return
 	}
+	fmt.Println(linktext("https://www.github.com/jake/"))
+	fmt.Println(linktext("http://linkedin.com/in/jake"))
+	fmt.Println(linktext("github.com/jake"))
 }
 
 var texEscaper = strings.NewReplacer(
@@ -62,8 +69,30 @@ var texEscaper = strings.NewReplacer(
 	`|`, `\textbar{}`, // wrong symbol in old fonts
 )
 
-func tex(s string) string {
-	return texEscaper.Replace(s)
+var hrefEscaper = strings.NewReplacer(
+	`%`, `\%`,
+	`#`, `\#`,
+	`&`, `\&`,
+)
+
+func href(s any) string {
+	return hrefEscaper.Replace(fmt.Sprint(s))
+}
+
+func linktext(v any) string {
+	s := fmt.Sprint(v)
+	s = strings.TrimPrefix(s, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	s = strings.TrimPrefix(s, "www.")
+	s = strings.TrimSuffix(s, "/")
+	return s
+}
+
+func tex(s any) string {
+	if s == nil {
+		return ""
+	}
+	return texEscaper.Replace(fmt.Sprint(s))
 }
 
 func myTex(s string) string {
