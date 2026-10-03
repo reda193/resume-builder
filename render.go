@@ -5,52 +5,61 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/template"
 )
 
 func main() {
-	jsonFile, err := os.Open("jake-ryan.json")
-
-	if err != nil {
-		fmt.Println(err)
-		return
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: go run render.go <template> <data.json> <output.tex>")
+		os.Exit(1)
 	}
-	fmt.Println("Succesfully Opened json")
 
+	tmplPath, dataPath, outPath := os.Args[1], os.Args[2], os.Args[3]
+
+	jsonFile, err := os.Open(dataPath)
+	if err != nil {
+		fail("Error opening file:", err)
+	}
 	defer jsonFile.Close()
 
 	byteValue, err := io.ReadAll(jsonFile)
 	if err != nil {
-		fmt.Println("Error reading file:", err)
-		return
+		fail("Error reading file:", err)
 	}
 
 	var result map[string]any
-	err = json.Unmarshal([]byte(byteValue), &result)
+	err = json.Unmarshal(byteValue, &result)
 	if err != nil {
-		fmt.Println("Error unmarshalling JSON:", err)
-		return
+		fail("Error decoding JSON:", err)
 	}
 
-	basics := result["basics"].(map[string]any)
-	fmt.Println(basics["name"])
-	tmpl, err := template.New("test").
+	tmpl, err := template.New(filepath.Base(tmplPath)).
 		Delims("<<", ">>").
 		Funcs(template.FuncMap{
 			"tex":      tex,
 			"href":     href,
-			"linktext": linktext}).
+			"linktext": linktext,
+		}).
 		Option("missingkey=zero").
-		Parse("Phone: <<tex .basics.phone>>, Fax: <<tex .basics.fax>>\n")
-	err = tmpl.Execute(os.Stdout, result)
+		ParseFiles(tmplPath)
 	if err != nil {
-		fmt.Println("Error filling template:", err)
-		return
+		fail("Error reading template:", err)
 	}
-	fmt.Println(linktext("https://www.github.com/jake/"))
-	fmt.Println(linktext("http://linkedin.com/in/jake"))
-	fmt.Println(linktext("github.com/jake"))
+
+	out, err := os.Create(outPath)
+	if err != nil {
+		fail("Error creating output file:", err)
+	}
+	defer out.Close()
+
+	err = tmpl.Execute(out, result)
+	if err != nil {
+		fail("Error filling template:", err)
+	}
+
+	fmt.Println("Wrote:", outPath)
 }
 
 var texEscaper = strings.NewReplacer(
@@ -107,4 +116,9 @@ func myTex(s string) string {
 
 	}
 	return b.String()
+}
+
+func fail(msg string, err error) {
+	fmt.Fprintln(os.Stderr, msg, err)
+	os.Exit(1)
 }
