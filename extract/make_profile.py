@@ -1,7 +1,11 @@
+"""Turn an extraction result into a profile.
+
+Usage: py make_profile.py <resume.json> <profile.json>
+"""
 import json
 import sys
 
-from profile import resume_to_profile, validate_profile
+from user_profile import resume_to_profile, validate_profile
 
 with open(sys.argv[1], encoding="utf-8") as f:
     resume = json.load(f)
