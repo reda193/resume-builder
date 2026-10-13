@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/schemas/resume/v1.json",
   "title": "Resume",
-  "description": "Template-independent resume data. All text is plain text (no LaTeX, no Markdown); the renderer escapes it. Templates ignore fields they don't display. Length limits keep single fields inside Jake's fixed-width headings, but combinations can still overflow: the build step must also reject LaTeX 'Overfull \\\\hbox' warnings.",
+  "description": "Template-independent resume data. All text is plain text (no LaTeX, no Markdown); the renderer escapes it. Templates ignore fields they don't display. Length limits keep single fields inside Jake's fixed-width headings, but combinations can still overflow: the build step must also reject LaTeX 'Overfull \\hbox' warnings. Rules JSON Schema can't express, checked in code: every custom_sections id is unique and appears in section_order, and every custom id in section_order has a matching custom section.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -55,17 +55,24 @@
       }
     },
     "section_order": {
-      "description": "Order sections appear in. Each section appears at most once. Templates skip sections they don't support and sections with no entries.",
+      "description": "Order sections appear in. Each section appears at most once. Built-in sections use their names; custom sections use their id. Templates skip sections with no content.",
       "type": "array",
       "uniqueItems": true,
       "minItems": 1,
       "items": {
-        "enum": [
-          "summary",
-          "education",
-          "experience",
-          "projects",
-          "skills"
+        "anyOf": [
+          {
+            "enum": [
+              "summary",
+              "education",
+              "experience",
+              "projects",
+              "skills"
+            ]
+          },
+          {
+            "$ref": "#/$defs/custom_id"
+          }
         ]
       }
     },
@@ -92,6 +99,14 @@
       "items": {
         "$ref": "#/$defs/skill_group"
       }
+    },
+    "custom_sections": {
+      "description": "Sections the user (or extraction) added, e.g. Volunteer Experience, Certifications. Each one must also appear in section_order to be shown.",
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "$ref": "#/$defs/custom_section"
+      }
     }
   },
   "$defs": {
@@ -108,7 +123,7 @@
     },
     "bullet": {
       "$ref": "#/$defs/text",
-      "maxLength": 220
+      "maxLength": 300
     },
     "url": {
       "description": "Full http(s) URL. Characters that break LaTeX links are not allowed.",
@@ -276,6 +291,97 @@
           "items": {
             "$ref": "#/$defs/text",
             "maxLength": 40
+          }
+        }
+      }
+    },
+    "custom_id": {
+      "description": "Identifier for a custom section, e.g. \"custom-volunteer\". Always starts with \"custom-\" so it can never clash with a built-in section name.",
+      "type": "string",
+      "pattern": "^custom-[a-z0-9-]+$",
+      "maxLength": 40
+    },
+    "custom_section": {
+      "description": "A user-defined section. layout picks how it is drawn, and which list holds its content: entries -> entries, list -> items, categories -> categories. The other two lists are ignored.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "layout"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/custom_id"
+        },
+        "title": {
+          "$ref": "#/$defs/text",
+          "maxLength": 40
+        },
+        "layout": {
+          "enum": [
+            "entries",
+            "list",
+            "categories"
+          ]
+        },
+        "entries": {
+          "description": "For layout 'entries': items shaped like a job (Volunteer Experience, Leadership).",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/custom_entry"
+          }
+        },
+        "items": {
+          "description": "For layout 'list': one line each (Awards, Certifications, Publications).",
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/bullet"
+          }
+        },
+        "categories": {
+          "description": "For layout 'categories': label followed by items (Spoken Languages, Coursework).",
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/skill_group"
+          }
+        }
+      }
+    },
+    "custom_entry": {
+      "description": "One entry in an 'entries' layout section. title is the role or name, organization is where.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title"
+      ],
+      "properties": {
+        "title": {
+          "$ref": "#/$defs/text",
+          "maxLength": 55
+        },
+        "organization": {
+          "$ref": "#/$defs/text",
+          "maxLength": 55
+        },
+        "location": {
+          "$ref": "#/$defs/text",
+          "maxLength": 32
+        },
+        "start": {
+          "$ref": "#/$defs/date"
+        },
+        "end": {
+          "$ref": "#/$defs/date"
+        },
+        "bullets": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/bullet"
           }
         }
       }

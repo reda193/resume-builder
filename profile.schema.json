@@ -1,0 +1,465 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.com/schemas/profile/v1.json",
+    "title": "Profile",
+    "description": "Everything about one user: every job, accomplishment, skill and project, more than fits on one resume. Tailoring picks items from the profile by id; code then builds a resume (resume.schema.json) from the chosen items. Rules checked in code, because JSON Schema can't express them: every id is unique across the profile; at most 75 skills in total across all groups; every custom section id in section_order exists.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "schema_version",
+      "basics",
+      "section_order"
+    ],
+    "properties": {
+      "schema_version": {
+        "const": "1.0"
+      },
+      "basics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/text",
+            "maxLength": 40
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^[^\\s\\\\{}%#]+@[^\\s\\\\{}%#]+$",
+            "maxLength": 80
+          },
+          "phone": {
+            "$ref": "#/$defs/text",
+            "maxLength": 30
+          },
+          "location": {
+            "$ref": "#/$defs/text",
+            "maxLength": 50,
+            "description": "City, region. Not shown by the Jake template."
+          },
+          "summary": {
+            "$ref": "#/$defs/text",
+            "maxLength": 500,
+            "description": "Not shown by the Jake template."
+          },
+          "links": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/$defs/link"
+            }
+          }
+        }
+      },
+      "section_order": {
+        "description": "The default order of sections, from the uploaded resume. Each tailored resume can reorder them.",
+        "type": "array",
+        "uniqueItems": true,
+        "minItems": 1,
+        "items": {
+          "anyOf": [
+            {
+              "enum": [
+                "summary",
+                "education",
+                "experience",
+                "projects",
+                "skills"
+              ]
+            },
+            {
+              "$ref": "#/$defs/custom_id"
+            }
+          ]
+        }
+      },
+      "experience": {
+        "type": "array",
+        "maxItems": 15,
+        "items": {
+          "$ref": "#/$defs/company"
+        }
+      },
+      "education": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+          "$ref": "#/$defs/education"
+        }
+      },
+      "projects": {
+        "type": "array",
+        "maxItems": 10,
+        "items": {
+          "$ref": "#/$defs/project"
+        }
+      },
+      "skills": {
+        "type": "array",
+        "maxItems": 10,
+        "items": {
+          "$ref": "#/$defs/skill_group"
+        }
+      },
+      "custom_sections": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+          "$ref": "#/$defs/custom_section"
+        }
+      }
+    },
+    "$defs": {
+      "text": {
+        "description": "Plain single-line text. No control characters or line breaks.",
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+      },
+      "date": {
+        "description": "Date as it should appear, with abbreviated months: \"Aug. 2018\", \"Sept. 2021\", \"2021\", \"Summer 2019\", \"Present\". Max 12 characters so date ranges fit beside titles.",
+        "$ref": "#/$defs/text",
+        "maxLength": 12
+      },
+      "url": {
+        "description": "Full http(s) URL. Characters that break LaTeX links are not allowed.",
+        "type": "string",
+        "pattern": "^https?://[^\\s\\\\{}]+$",
+        "maxLength": 200
+      },
+      "link": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "$ref": "#/$defs/url"
+          },
+          "label": {
+            "$ref": "#/$defs/text",
+            "maxLength": 50,
+            "description": "Optional display text. If absent, derived from the URL (scheme, www. and trailing slash removed)."
+          }
+        }
+      },
+      "id": {
+        "description": "Identifier assigned by code, never by the AI or the user: a letter prefix and a number, like \"b12\". Unique across the whole profile. Prefixes: co (company), r (role), b (bullet), ed (education), pr (project), sg (skill group), sk (skill), e (custom entry), li (custom list item).",
+        "type": "string",
+        "pattern": "^[a-z]{1,2}[0-9]+$",
+        "maxLength": 12
+      },
+      "source": {
+        "description": "Where an item came from: the uploaded resume, or added by the user later. Tailoring treats both as fact.",
+        "enum": [
+          "upload",
+          "user"
+        ]
+      },
+      "bullet": {
+        "description": "One accomplishment. Up to about three lines of resume text: profile bullets can hold more detail than fits on the page, and tailoring condenses them.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "text": {
+            "$ref": "#/$defs/text",
+            "maxLength": 350
+          },
+          "source": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      },
+      "role": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "title": {
+            "$ref": "#/$defs/text",
+            "maxLength": 55
+          },
+          "start": {
+            "$ref": "#/$defs/date"
+          },
+          "end": {
+            "$ref": "#/$defs/date"
+          },
+          "bullets": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "$ref": "#/$defs/bullet"
+            }
+          }
+        }
+      },
+      "company": {
+        "description": "One employer. Several roles at the same employer go in roles, most recent first.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "company",
+          "roles"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "company": {
+            "$ref": "#/$defs/text",
+            "maxLength": 55
+          },
+          "location": {
+            "$ref": "#/$defs/text",
+            "maxLength": 32
+          },
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/$defs/role"
+            }
+          }
+        }
+      },
+      "education": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "school"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "school": {
+            "$ref": "#/$defs/text",
+            "maxLength": 60
+          },
+          "location": {
+            "$ref": "#/$defs/text",
+            "maxLength": 32
+          },
+          "degree": {
+            "$ref": "#/$defs/text",
+            "maxLength": 75
+          },
+          "start": {
+            "$ref": "#/$defs/date"
+          },
+          "end": {
+            "$ref": "#/$defs/date"
+          },
+          "details": {
+            "description": "GPA, honours, coursework.",
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "$ref": "#/$defs/bullet"
+            }
+          }
+        }
+      },
+      "project": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "$ref": "#/$defs/text",
+            "maxLength": 40
+          },
+          "tech": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/$defs/text",
+              "maxLength": 20
+            }
+          },
+          "link": {
+            "$ref": "#/$defs/url"
+          },
+          "start": {
+            "$ref": "#/$defs/date"
+          },
+          "end": {
+            "$ref": "#/$defs/date"
+          },
+          "bullets": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "$ref": "#/$defs/bullet"
+            }
+          }
+        }
+      },
+      "skill": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "$ref": "#/$defs/text",
+            "maxLength": 40
+          },
+          "source": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      },
+      "skill_group": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "category",
+          "items"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "category": {
+            "$ref": "#/$defs/text",
+            "maxLength": 30
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 40,
+            "items": {
+              "$ref": "#/$defs/skill"
+            }
+          }
+        }
+      },
+      "custom_id": {
+        "description": "Identifier for a custom section, e.g. \"custom-volunteer\". Always starts with \"custom-\" so it can never clash with a built-in section name.",
+        "type": "string",
+        "pattern": "^custom-[a-z0-9-]+$",
+        "maxLength": 40
+      },
+      "custom_entry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "title": {
+            "$ref": "#/$defs/text",
+            "maxLength": 55
+          },
+          "organization": {
+            "$ref": "#/$defs/text",
+            "maxLength": 55
+          },
+          "location": {
+            "$ref": "#/$defs/text",
+            "maxLength": 32
+          },
+          "start": {
+            "$ref": "#/$defs/date"
+          },
+          "end": {
+            "$ref": "#/$defs/date"
+          },
+          "bullets": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "$ref": "#/$defs/bullet"
+            }
+          }
+        }
+      },
+      "custom_section": {
+        "description": "A user-defined section. layout picks how it is drawn and which list holds its content: entries -> entries, list -> items, categories -> categories.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "layout"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/custom_id"
+          },
+          "title": {
+            "$ref": "#/$defs/text",
+            "maxLength": 40
+          },
+          "layout": {
+            "enum": [
+              "entries",
+              "list",
+              "categories"
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/$defs/custom_entry"
+            }
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 15,
+            "items": {
+              "$ref": "#/$defs/bullet"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "$ref": "#/$defs/skill_group"
+            }
+          }
+        }
+      }
+    }
+  }

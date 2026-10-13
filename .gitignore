@@ -6,3 +6,4 @@ jake-ryan.tex
 out.tex
 .venv/
 resume-examples/
+*.env

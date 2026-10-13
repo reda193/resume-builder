@@ -5,11 +5,23 @@
     "phone": "123-456-7890",
     "email": "jake@su.edu",
     "links": [
-      { "url": "https://linkedin.com/in/jake" },
-      { "url": "https://github.com/jake" }
+      {
+        "url": "https://linkedin.com/in/jake"
+      },
+      {
+        "url": "https://github.com/jake"
+      }
     ]
   },
-  "section_order": ["education", "experience", "projects", "skills"],
+  "section_order": [
+    "education",
+    "experience",
+    "custom-volunteer",
+    "projects",
+    "custom-certs",
+    "skills",
+    "custom-languages"
+  ],
   "education": [
     {
       "school": "Southwestern University",
@@ -82,7 +94,13 @@
   "projects": [
     {
       "name": "Gitlytics",
-      "tech": ["Python", "Flask", "React", "PostgreSQL", "Docker"],
+      "tech": [
+        "Python",
+        "Flask",
+        "React",
+        "PostgreSQL",
+        "Docker"
+      ],
       "start": "June 2020",
       "end": "Present",
       "bullets": [
@@ -94,7 +112,13 @@
     },
     {
       "name": "Simple Paintball",
-      "tech": ["Spigot API", "Java", "Maven", "TravisCI", "Git"],
+      "tech": [
+        "Spigot API",
+        "Java",
+        "Maven",
+        "TravisCI",
+        "Git"
+      ],
       "start": "May 2018",
       "end": "May 2020",
       "bullets": [
@@ -108,19 +132,92 @@
   "skills": [
     {
       "category": "Languages",
-      "items": ["Java", "Python", "C/C++", "SQL (Postgres)", "JavaScript", "HTML/CSS", "R"]
+      "items": [
+        "Java",
+        "Python",
+        "C/C++",
+        "SQL (Postgres)",
+        "JavaScript",
+        "HTML/CSS",
+        "R"
+      ]
     },
     {
       "category": "Frameworks",
-      "items": ["React", "Node.js", "Flask", "JUnit", "WordPress", "Material-UI", "FastAPI"]
+      "items": [
+        "React",
+        "Node.js",
+        "Flask",
+        "JUnit",
+        "WordPress",
+        "Material-UI",
+        "FastAPI"
+      ]
     },
     {
       "category": "Developer Tools",
-      "items": ["Git", "Docker", "TravisCI", "Google Cloud Platform", "VS Code", "Visual Studio", "PyCharm", "IntelliJ", "Eclipse"]
+      "items": [
+        "Git",
+        "Docker",
+        "TravisCI",
+        "Google Cloud Platform",
+        "VS Code",
+        "Visual Studio",
+        "PyCharm",
+        "IntelliJ",
+        "Eclipse"
+      ]
     },
     {
       "category": "Libraries",
-      "items": ["pandas", "NumPy", "Matplotlib"]
+      "items": [
+        "pandas",
+        "NumPy",
+        "Matplotlib"
+      ]
+    }
+  ],
+  "custom_sections": [
+    {
+      "id": "custom-volunteer",
+      "title": "Volunteer Experience",
+      "layout": "entries",
+      "entries": [
+        {
+          "title": "Tutor",
+          "organization": "Hamilton Public Library",
+          "location": "Hamilton, ON",
+          "start": "Sept. 2023",
+          "end": "Present",
+          "bullets": [
+            "Tutored 12 high school students in Python and math each week"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "custom-certs",
+      "title": "Certifications",
+      "layout": "list",
+      "items": [
+        "AWS Certified Cloud Practitioner (2024)",
+        "Microsoft Azure Fundamentals AZ-900 (2023)"
+      ]
+    },
+    {
+      "id": "custom-languages",
+      "title": "Languages",
+      "layout": "categories",
+      "categories": [
+        {
+          "category": "Spoken",
+          "items": [
+            "English",
+            "Arabic",
+            "French"
+          ]
+        }
+      ]
     }
   ]
 }
