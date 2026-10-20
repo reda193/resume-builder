@@ -55,7 +55,15 @@ func main() {
 		fail("Error reading template:", err)
 	}
 
-	out, err := os.Create(outPath)
+	dir, err := os.MkdirTemp("", "resume-build-*")
+	if err != nil {
+		fail("Error making directory:", err)
+	}
+	defer os.RemoveAll(dir)
+
+	texPath := filepath.Join(dir, "resume.tex")
+
+	out, err := os.Create(texPath)
 	if err != nil {
 		fail("Error creating output file:", err)
 	}
@@ -78,6 +86,7 @@ func main() {
 	if err != nil {
 		fail("Error marshaling JSON:", err)
 	}
+
 	fmt.Println(string(jsonData))
 }
 
