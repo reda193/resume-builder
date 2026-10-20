@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 )
 
 type Report struct {
@@ -73,6 +76,26 @@ func main() {
 	if err != nil {
 		fail("Error filling template:", err)
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape", "resume.tex")
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fail("Error running pdflatex:", err)
+	}
+	pdf, err := os.ReadFile(filepath.Join(dir, "resume.pdf"))
+	if err != nil {
+		fail("Error reading PDF:", err)
+	}
+	err = os.WriteFile(outPath, pdf, 0644)
+	if err != nil {
+		fail("Error writing PDF:", err)
+	}
+	fmt.Fprintln(os.Stderr, string(output))
+
+	out.Close()
 
 	report := Report{
 		Worked:   true,
