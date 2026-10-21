@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -75,7 +77,10 @@ func main() {
 	err = tmpl.Execute(out, result)
 	if err != nil {
 		fail("Error filling template:", err)
+
 	}
+
+	out.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -85,6 +90,14 @@ func main() {
 	if err != nil {
 		fail("Error running pdflatex:", err)
 	}
+
+	cmd = exec.CommandContext(ctx, "pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape", "resume.tex")
+	cmd.Dir = dir
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		fail("Error running pdflatex:", err)
+	}
+
 	pdf, err := os.ReadFile(filepath.Join(dir, "resume.pdf"))
 	if err != nil {
 		fail("Error reading PDF:", err)
@@ -95,14 +108,41 @@ func main() {
 	}
 	fmt.Fprintln(os.Stderr, string(output))
 
-	out.Close()
+	logData, err := os.ReadFile(filepath.Join(dir, "resume.log"))
 
+	pagesPattern := regexp.MustCompile(`Output written on .* \((\d+) pages?`)
+
+	match := pagesPattern.FindStringSubmatch(string(logData))
+	if match == nil {
+		fail("This is not a page number.", err)
+	}
+
+	val, err := strconv.Atoi(match[1])
+	if err != nil {
+		fail("Conversion error:", err)
+	}
 	report := Report{
 		Worked:   true,
 		PdfPath:  outPath,
-		Pages:    0,
+		Pages:    val,
 		Problems: []string{},
 	}
+
+	overfullPattern := regexp.MustCompile(`Overfull \\hbox \(([\d.]+)pt too wide\)`)
+	matches := overfullPattern.FindAllStringSubmatch(string(logData), -1)
+	for _, m := range matches {
+		width, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			continue
+		}
+		if width > 1 {
+			report.Problems = append(report.Problems, fmt.Sprintf("text runs past the margin by %.1fpt", width))
+		}
+	}
+	if len(report.Problems) > 0 {
+		report.Worked = false
+	}
+
 	fmt.Fprintln(os.Stderr, "Wrote:", outPath)
 
 	jsonData, err := json.MarshalIndent(report, "", "   ")
@@ -111,6 +151,7 @@ func main() {
 	}
 
 	fmt.Println(string(jsonData))
+
 }
 
 var texEscaper = strings.NewReplacer(
