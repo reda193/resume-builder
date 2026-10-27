@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,10 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 )
 
 type Report struct {
@@ -23,12 +28,18 @@ type Report struct {
 }
 
 func main() {
-	if len(os.Args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: go run . <template> <data.json> <output.tex>")
+	if len(os.Args) != 5 {
+		fmt.Fprintln(os.Stderr, "usage: go run . <template> <schema.json> <data.json> <output.pdf>")
 		os.Exit(1)
 	}
 
-	tmplPath, dataPath, outPath := os.Args[1], os.Args[2], os.Args[3]
+	tmplPath, schemaPath, dataPath, outPath := os.Args[1], os.Args[2], os.Args[3], os.Args[4]
+
+	compiler := jsonschema.NewCompiler()
+	schema, err := compiler.Compile(schemaPath)
+	if err != nil {
+		fail("Error loading schema:", err)
+	}
 
 	jsonFile, err := os.Open(dataPath)
 	if err != nil {
@@ -47,13 +58,14 @@ func main() {
 		fail("Error decoding JSON:", err)
 	}
 
-	charProblems := badCharacters(result, "")
-	if len(charProblems) > 0 {
+	problems := schemaProblems(schema, result)
+	problems = append(problems, badCharacters(result, "")...)
+	if len(problems) > 0 {
 		report := Report{
 			Worked:   false,
 			PdfPath:  outPath,
 			Pages:    0,
-			Problems: charProblems,
+			Problems: problems,
 		}
 		jsonData, _ := json.MarshalIndent(report, "", "   ")
 		fmt.Println(string(jsonData))
@@ -80,7 +92,6 @@ func main() {
 	defer os.RemoveAll(dir)
 
 	texPath := filepath.Join(dir, "resume.tex")
-
 	out, err := os.Create(texPath)
 	if err != nil {
 		fail("Error creating output file:", err)
@@ -90,9 +101,7 @@ func main() {
 	err = tmpl.Execute(out, result)
 	if err != nil {
 		fail("Error filling template:", err)
-
 	}
-
 	out.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -101,13 +110,14 @@ func main() {
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		fmt.Fprintln(os.Stderr, string(output))
 		fail("Error running pdflatex:", err)
 	}
-
 	cmd = exec.CommandContext(ctx, "pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-no-shell-escape", "resume.tex")
 	cmd.Dir = dir
 	output, err = cmd.CombinedOutput()
 	if err != nil {
+		fmt.Fprintln(os.Stderr, string(output))
 		fail("Error running pdflatex:", err)
 	}
 
@@ -119,21 +129,21 @@ func main() {
 	if err != nil {
 		fail("Error writing PDF:", err)
 	}
-	fmt.Fprintln(os.Stderr, string(output))
 
 	logData, err := os.ReadFile(filepath.Join(dir, "resume.log"))
-
+	if err != nil {
+		fail("Error reading log:", err)
+	}
 	pagesPattern := regexp.MustCompile(`Output written on .* \((\d+) pages?`)
-
 	match := pagesPattern.FindStringSubmatch(string(logData))
 	if match == nil {
-		fail("This is not a page number.", err)
+		fail("Error reading page count:", errors.New("no page count in the log"))
 	}
-
 	val, err := strconv.Atoi(match[1])
 	if err != nil {
 		fail("Conversion error:", err)
 	}
+
 	report := Report{
 		Worked:   true,
 		PdfPath:  outPath,
@@ -157,76 +167,38 @@ func main() {
 	}
 
 	fmt.Fprintln(os.Stderr, "Wrote:", outPath)
-
 	jsonData, err := json.MarshalIndent(report, "", "   ")
 	if err != nil {
 		fail("Error marshaling JSON:", err)
 	}
-
 	fmt.Println(string(jsonData))
-
 }
 
-var texEscaper = strings.NewReplacer(
-	`\`, `\textbackslash{}`, // starts a command
-	`&`, `\&`, // next table column
-	`%`, `\%`, // comment: hides the rest of the line
-	`$`, `\$`, // math mode
-	`#`, `\#`, // command parameter
-	`_`, `\_`, // subscript
-	`{`, `\{`, // start group
-	`}`, `\}`, // end group
-	`~`, `\textasciitilde{}`, // non-breaking space
-	`^`, `\textasciicircum{}`, // superscript
-	`<`, `\textless{}`, // wrong symbol in old fonts
-	`>`, `\textgreater{}`, // wrong symbol in old fonts
-	`|`, `\textbar{}`, // wrong symbol in old fonts
-)
-
-var hrefEscaper = strings.NewReplacer(
-	`%`, `\%`,
-	`#`, `\#`,
-	`&`, `\&`,
-)
-
-func href(s any) string {
-	return hrefEscaper.Replace(fmt.Sprint(s))
-}
-
-func linktext(v any) string {
-	s := fmt.Sprint(v)
-	s = strings.TrimPrefix(s, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	s = strings.TrimPrefix(s, "www.")
-	s = strings.TrimSuffix(s, "/")
-	return s
-}
-
-func tex(s any) string {
-	if s == nil {
-		return ""
+func schemaProblems(schema *jsonschema.Schema, data any) []string {
+	err := schema.Validate(data)
+	if err == nil {
+		return []string{}
 	}
-	return texEscaper.Replace(fmt.Sprint(s))
-}
-
-func myTex(s string) string {
-	var b strings.Builder
-	for _, ch := range s {
-		switch ch {
-		case '&':
-			b.WriteString(`\&`)
-		default:
-			b.WriteRune(ch)
-		}
-
+	validationErr, ok := err.(*jsonschema.ValidationError)
+	if !ok {
+		return []string{err.Error()}
 	}
-	return b.String()
+	return leafProblems(validationErr)
 }
 
-func fail(msg string, err error) {
-	fmt.Fprintln(os.Stderr, msg, err)
-	os.Exit(1)
+func leafProblems(e *jsonschema.ValidationError) []string {
+	if len(e.Causes) == 0 {
+		where := "/" + strings.Join(e.InstanceLocation, "/")
+		return []string{fmt.Sprintf("%s: %s", where, e.ErrorKind.LocalizedString(printer))}
+	}
+	problems := []string{}
+	for _, cause := range e.Causes {
+		problems = append(problems, leafProblems(cause)...)
+	}
+	return problems
 }
+
+var printer = message.NewPrinter(language.English)
 
 func allowed(r rune) bool {
 	return (r >= 0x20 && r <= 0x7E) ||
@@ -260,5 +232,47 @@ func badCharacters(val any, path string) []string {
 	default:
 		return []string{}
 	}
+}
 
+var texEscaper = strings.NewReplacer(
+	`\`, `\textbackslash{}`,
+	`&`, `\&`,
+	`%`, `\%`,
+	`$`, `\$`,
+	`#`, `\#`,
+	`_`, `\_`,
+	`{`, `\{`,
+	`}`, `\}`,
+	`~`, `\textasciitilde{}`,
+	`^`, `\textasciicircum{}`,
+	`<`, `\textless{}`,
+	`>`, `\textgreater{}`,
+	`|`, `\textbar{}`,
+)
+
+var hrefEscaper = strings.NewReplacer(`%`, `\%`, `#`, `\#`, `&`, `\&`)
+
+func href(s any) string {
+	return hrefEscaper.Replace(fmt.Sprint(s))
+}
+
+func linktext(v any) string {
+	s := fmt.Sprint(v)
+	s = strings.TrimPrefix(s, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	s = strings.TrimPrefix(s, "www.")
+	s = strings.TrimSuffix(s, "/")
+	return s
+}
+
+func tex(s any) string {
+	if s == nil {
+		return ""
+	}
+	return texEscaper.Replace(fmt.Sprint(s))
+}
+
+func fail(msg string, err error) {
+	fmt.Fprintln(os.Stderr, msg, err)
+	os.Exit(1)
 }
