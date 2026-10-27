@@ -47,6 +47,19 @@ func main() {
 		fail("Error decoding JSON:", err)
 	}
 
+	charProblems := badCharacters(result, "")
+	if len(charProblems) > 0 {
+		report := Report{
+			Worked:   false,
+			PdfPath:  outPath,
+			Pages:    0,
+			Problems: charProblems,
+		}
+		jsonData, _ := json.MarshalIndent(report, "", "   ")
+		fmt.Println(string(jsonData))
+		os.Exit(1)
+	}
+
 	tmpl, err := template.New(filepath.Base(tmplPath)).
 		Delims("<<", ">>").
 		Funcs(template.FuncMap{
@@ -213,4 +226,39 @@ func myTex(s string) string {
 func fail(msg string, err error) {
 	fmt.Fprintln(os.Stderr, msg, err)
 	os.Exit(1)
+}
+
+func allowed(r rune) bool {
+	return (r >= 0x20 && r <= 0x7E) ||
+		(r >= 0xA0 && r <= 0xFF) ||
+		(r >= 0x100 && r <= 0x17F) ||
+		strings.ContainsRune("–—‘’“”•…", r)
+}
+
+func badCharacters(val any, path string) []string {
+	switch v := val.(type) {
+	case map[string]any:
+		problems := []string{}
+		for key, item := range v {
+			problems = append(problems, badCharacters(item, path+"/"+key)...)
+		}
+		return problems
+	case []any:
+		problems := []string{}
+		for i, item := range v {
+			problems = append(problems, badCharacters(item, path+"/"+strconv.Itoa(i))...)
+		}
+		return problems
+	case string:
+		problems := []string{}
+		for _, r := range v {
+			if !allowed(r) {
+				problems = append(problems, fmt.Sprintf("%s: the character %q can't be printed", path, r))
+			}
+		}
+		return problems
+	default:
+		return []string{}
+	}
+
 }
