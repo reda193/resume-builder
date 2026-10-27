@@ -2,7 +2,7 @@
 
 Usage:
     py tailor.py <profile.json> <job.txt> <output.json> [--lines 2] [--bullets 3] [--projects 2]
-                 [--group-roles]
+                 [--group-roles] [--pages 1] [--no-build]
 
 Options:
     --lines     Lines per bullet on the page (1 or 2).
@@ -10,10 +10,16 @@ Options:
     --projects  Most projects.
     --group-roles  Show several roles at the same company under one company
                    heading. By default, every role gets its own entry.
+    --pages     Most pages (default 1). The resume is built into a PDF and
+                trimmed, least important items first, until it fits.
+    --no-build  Only write the resume JSON, without building the PDF.
 
 Outputs:
     <output.json>              The tailored resume, ready for the Go renderer.
     <output>.cover-letter.txt  The cover letter.
+    <output>.pdf               The resume as a PDF, built by the Go build tool in
+                               Docker (Docker Desktop must be running, with the
+                               resume-latex image built).
 
 The AI only picks items by id and rewrites bullet wording. Company names, job
 titles, dates and locations are copied from the profile by code, so the AI
@@ -28,6 +34,7 @@ Constants:
 """
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -46,6 +53,11 @@ HERE = Path(__file__).parent
 INSTRUCTIONS = ((HERE / "prompts" / "tailoring.md").read_text(encoding="utf-8")
                 + "\n\n# Writing style guide\n\n"
                 + (HERE / "prompts" / "writing-style.md").read_text(encoding="utf-8"))
+
+PROJECT_ROOT = HERE.parent.resolve()
+TEMPLATE = PROJECT_ROOT / "jake.tex.tmpl"
+SCHEMA = PROJECT_ROOT / "resume.schema.json"
+DOCKER_IMAGE = "resume-latex"
 
 CHARS_FOR_LINES = {1: 100, 2: 210}
 FIX_ROUNDS = 2
@@ -341,7 +353,7 @@ def tailor(profile, job, settings):
     return answer, problems
 
 
-def assemble(profile, answer, settings):
+def assemble(profile, answer, settings, dropped=frozenset()):
     """Build the tailored resume from the profile and the AI's choices.
 
     Facts (companies, titles, dates, locations) come from the profile; only the
@@ -358,6 +370,8 @@ def assemble(profile, answer, settings):
         answer: The AI's answer, matching OUTPUT_SCHEMA.
         settings: A dictionary with "lines", "bullets", "projects" and, optionally,
             "group_roles".
+        dropped: Ids of bullets and projects to leave out, chosen by fit_to_page
+            to make the resume fit its page limit.
 
     Returns:
         A resume dictionary matching resume.schema.json, with empty values removed.
@@ -395,7 +409,7 @@ def assemble(profile, answer, settings):
         """
         picked = [item for item in items if bullets.get(item["id"], (None,))[0] == owner_id]
         picked.sort(key=lambda item: item["rank"])
-        texts = [safe_text(item) for item in picked[:settings["bullets"]]]
+        texts = [safe_text(item) for item in picked[:settings["bullets"]] if item["id"] not in dropped]
         return [text for text in texts if text]
 
     chosen_roles = {entry["role_id"]: entry for entry in answer["roles"] if entry["role_id"] in roles}
@@ -415,6 +429,8 @@ def assemble(profile, answer, settings):
     chosen_projects = [entry for entry in answer["projects"] if entry["project_id"] in projects]
     project_list = []
     for entry in chosen_projects[:settings["projects"]]:
+        if entry["project_id"] in dropped:
+            continue
         project = projects[entry["project_id"]]
         project_list.append({
             "name": project["name"], "tech": project.get("tech", []), "link": project.get("link", ""),
@@ -452,6 +468,196 @@ def assemble(profile, answer, settings):
     return remove_empty(resume)
 
 
+def removal_order(profile, answer, settings):
+    """List what fit_to_page may remove, least important first.
+
+    Only items that actually appear on the resume are listed. The order is:
+    extra bullets (every job and project keeps its best bullet for now), then
+    whole projects, then each job's last bullet. Within each group, the worst
+    ranked item goes first. Jobs themselves are never removed, so the work
+    history has no gaps.
+
+    Args:
+        profile: A profile dictionary matching profile.schema.json.
+        answer: The AI's answer, matching OUTPUT_SCHEMA.
+        settings: A dictionary with "bullets" and "projects".
+
+    Returns:
+        A list of bullet and project ids, in the order to remove them.
+    """
+    roles, projects, bullets, skills = index_profile(profile)
+
+    def shown(owner_id, items):
+        """Return the bullets shown for one role or project, best rank first."""
+        picked = [item for item in items if bullets.get(item["id"], (None,))[0] == owner_id]
+        picked.sort(key=lambda item: item["rank"])
+        return picked[:settings["bullets"]]
+
+    role_bullets = [shown(entry["role_id"], entry["bullets"])
+                    for entry in answer["roles"] if entry["role_id"] in roles]
+    project_entries = [entry for entry in answer["projects"] if entry["project_id"] in projects]
+    project_bullets = [(entry["project_id"], shown(entry["project_id"], entry["bullets"]))
+                       for entry in project_entries[:settings["projects"]]]
+
+    extras = [item for items in role_bullets for item in items[1:]]
+    extras += [item for _, items in project_bullets for item in items[1:]]
+    extras.sort(key=lambda item: item["rank"], reverse=True)
+
+    def project_rank(pair):
+        """Return a project's best bullet rank, or infinity if it has no bullets."""
+        return pair[1][0]["rank"] if pair[1] else float("inf")
+
+    project_ids = [pid for pid, _ in sorted(project_bullets, key=project_rank, reverse=True)]
+
+    last_bullets = [items[0] for items in role_bullets if items]
+    last_bullets.sort(key=lambda item: item["rank"], reverse=True)
+
+    return [item["id"] for item in extras] + project_ids + [item["id"] for item in last_bullets]
+
+
+def container_path(path):
+    """Translate a path inside the project folder into its path in the build container.
+
+    The build container sees the project folder as /work, so a file at
+    <project>/resume-examples/out.json is /work/resume-examples/out.json there.
+
+    Args:
+        path: A path to a file inside the project folder.
+
+    Returns:
+        The same file's path inside the container, as a string.
+
+    Raises:
+        ValueError: If the path is outside the project folder, where the
+            container can't see it.
+    """
+    try:
+        relative = Path(path).resolve().relative_to(PROJECT_ROOT)
+    except ValueError:
+        raise ValueError(f"{path} is outside the project folder ({PROJECT_ROOT}), "
+                         f"so the build container can't reach it")
+    return "/work/" + relative.as_posix()
+
+
+def build_command(data_path, pdf_path):
+    """Return the command that runs the Go build tool in Docker.
+
+    Args:
+        data_path: The resume JSON to build.
+        pdf_path: Where to write the PDF.
+
+    Returns:
+        The command as a list of arguments, ready for subprocess.run.
+    """
+    return [
+        "docker", "run", "--rm",
+        "-v", f"{PROJECT_ROOT}:/work",
+        "-v", "go-cache:/root/go/pkg/mod",
+        "-w", "/work/renderer",
+        DOCKER_IMAGE,
+        "go", "run", ".",
+        container_path(TEMPLATE), container_path(SCHEMA),
+        container_path(data_path), container_path(pdf_path),
+    ]
+
+
+def run_build(data_path, pdf_path):
+    """Build a resume JSON file into a PDF with the Go build tool, and return its report.
+
+    Args:
+        data_path: The resume JSON to build.
+        pdf_path: Where to write the PDF.
+
+    Returns:
+        The build report as a dictionary, with "ok", "pdf", "pages" and "problems".
+
+    Raises:
+        RuntimeError: If the build tool couldn't run or didn't print a report,
+            for example because Docker isn't running.
+    """
+    try:
+        result = subprocess.run(build_command(data_path, pdf_path), capture_output=True,
+                                text=True, encoding="utf-8", errors="replace", timeout=180)
+    except FileNotFoundError:
+        raise RuntimeError("could not run docker: is Docker Desktop installed and running?")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("the build took longer than 3 minutes")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        details = (result.stderr or result.stdout).strip().splitlines()[-5:]
+        raise RuntimeError("the build tool did not return a report:\n  " + "\n  ".join(details))
+
+
+def fit_to_page(profile, answer, settings, output_path):
+    """Build the resume, removing the least important items until it fits the page limit.
+
+    Items are removed in removal_order. Since removing items never makes a
+    resume longer, the smallest number of removals that fits is found with a
+    binary search, so even a long resume needs only a handful of builds, and a
+    resume that already fits needs just one.
+
+    Args:
+        profile: A profile dictionary matching profile.schema.json.
+        answer: The AI's answer, matching OUTPUT_SCHEMA.
+        settings: A dictionary with "lines", "bullets", "projects", "pages" and,
+            optionally, "group_roles".
+        output_path: Where to save the resume JSON. The PDF is saved next to it.
+
+    Returns:
+        A tuple (resume, report, removed): the final resume, its build report,
+        and the ids of the bullets and projects removed to make it fit.
+    """
+    pdf_path = Path(output_path).with_suffix(".pdf")
+    order = removal_order(profile, answer, settings)
+    builds = {}
+    last_built = []
+
+    def build_without(count):
+        """Build the resume without the first count items of the removal order.
+
+        Args:
+            count: How many items to remove.
+
+        Returns:
+            A tuple (resume, report) for that build.
+        """
+        resume = assemble(profile, answer, settings, frozenset(order[:count]))
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(resume, f, indent=2, ensure_ascii=False)
+        report = run_build(output_path, pdf_path)
+        print(f"Built with {count} item(s) removed: {report['pages']} page(s)", file=sys.stderr)
+        builds[count] = (resume, report)
+        last_built.append(count)
+        return resume, report
+
+    def fits(report):
+        """Return whether a build succeeded within the page limit."""
+        return 0 < report["pages"] <= settings["pages"]
+
+    resume, report = build_without(0)
+    if report["pages"] == 0 or fits(report) or not order:
+        return resume, report, []
+
+    resume, report = build_without(len(order))
+    if not fits(report):
+        return resume, report, order
+
+    low, high = 0, len(order)
+    while high - low > 1:
+        middle = (low + high) // 2
+        _, middle_report = build_without(middle)
+        if fits(middle_report):
+            high = middle
+        else:
+            low = middle
+
+    resume, report = builds[high]
+    if last_built[-1] != high:
+        resume, report = build_without(high)
+    return resume, report, order[:high]
+
+
 def cover_letter_text(answer, profile):
     """Format the AI's cover letter as plain text, with a greeting and sign-off.
 
@@ -478,9 +684,12 @@ def main():
     parser.add_argument("--projects", type=int, default=2, help="most projects")
     parser.add_argument("--group-roles", action="store_true",
                         help="show several roles at the same company under one company heading")
+    parser.add_argument("--pages", type=int, default=1, help="most pages; the resume is trimmed to fit")
+    parser.add_argument("--no-build", action="store_true",
+                        help="only write the resume JSON, without building the PDF or fitting it to the page")
     args = parser.parse_args()
     settings = {"lines": args.lines, "bullets": args.bullets, "projects": args.projects,
-                "group_roles": args.group_roles}
+                "group_roles": args.group_roles, "pages": args.pages}
 
     try:
         with open(args.profile, encoding="utf-8") as f:
@@ -496,13 +705,28 @@ def main():
         print(f"error: tailoring failed ({e})", file=sys.stderr)
         sys.exit(1)
 
-    resume = assemble(profile, answer, settings)
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(resume, f, indent=2, ensure_ascii=False)
     letter_path = Path(args.output).with_suffix(".cover-letter.txt")
     letter_path.write_text(cover_letter_text(answer, profile), encoding="utf-8")
+
+    report = None
+    removed = []
+    if args.no_build:
+        resume = assemble(profile, answer, settings)
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(resume, f, indent=2, ensure_ascii=False)
+    else:
+        try:
+            resume, report, removed = fit_to_page(profile, answer, settings, args.output)
+        except (RuntimeError, ValueError) as e:
+            print(f"error: building the PDF failed ({e})", file=sys.stderr)
+            sys.exit(1)
+
     print(f"Wrote: {args.output}")
     print(f"Wrote: {letter_path}")
+    if report is not None:
+        print(f"Wrote: {Path(args.output).with_suffix('.pdf')} ({report['pages']} page(s))")
+        if removed:
+            print(f"Removed to fit {settings['pages']} page(s): {', '.join(removed)}")
 
     covered = [r for r in answer["requirements"] if r["bullet_ids"]]
     print(f"\nRequirements with evidence: {len(covered)} of {len(answer['requirements'])}")
@@ -525,6 +749,12 @@ def main():
             print(f"  - {problem}", file=sys.stderr)
     for problem in validate_resume(resume):
         print(f"Warning: {problem}", file=sys.stderr)
+    if report is not None:
+        for problem in report["problems"]:
+            print(f"Warning: {problem}", file=sys.stderr)
+        if report["pages"] > settings["pages"]:
+            print(f"Warning: still {report['pages']} pages after removing everything allowed; "
+                  f"every job is kept, so try --lines 1 or fewer --bullets", file=sys.stderr)
 
 
 if __name__ == "__main__":
