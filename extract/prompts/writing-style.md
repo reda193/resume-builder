@@ -11,6 +11,7 @@ Every line of resume and cover-letter copy should read like a real person wrote 
 - Commas and "and" for asides and lists, never dashes.
 - Confident first person in the cover letter ("I work across...", "I enjoy..."), not boastful, not hedging.
 - One idea per bullet. Don't fuse three wins with semicolons.
+- Use the space a bullet is given. One line on the page holds about 105 characters, and two lines about 215. When shortening or condensing a bullet to fit one line, aim for 95 to 105 characters, keeping as many details as fit and dropping only what doesn't. For two lines, aim close to 215.
 
 ## Tone: friendly, eager, humble
 

@@ -29,7 +29,7 @@ and any bullet that still fails the checks falls back to its original wording.
 Constants:
     CHARS_FOR_LINES: Character limit per bullet for each lines-per-bullet
         setting, measured in Jake's template (one line holds about 108
-        characters) with a safety margin.
+        characters) with a small safety margin.
     FIX_ROUNDS: How many times the AI may fix problems the checks found.
 """
 import argparse
@@ -59,7 +59,7 @@ TEMPLATE = PROJECT_ROOT / "jake.tex.tmpl"
 SCHEMA = PROJECT_ROOT / "resume.schema.json"
 DOCKER_IMAGE = "resume-latex"
 
-CHARS_FOR_LINES = {1: 100, 2: 210}
+CHARS_FOR_LINES = {1: 105, 2: 215}
 FIX_ROUNDS = 2
 BUILTIN_SECTIONS = ["education", "experience", "projects", "skills"]
 
