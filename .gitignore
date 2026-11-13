@@ -7,3 +7,4 @@ out.tex
 .venv/
 resume-examples/
 *.env
+__pycache__/

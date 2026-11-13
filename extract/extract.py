@@ -2,6 +2,11 @@
 
 Usage: py extract.py <resume.pdf or resume.docx> <output.json>
 
+The work is done by extract_from_file, which takes the file's contents as
+bytes, so the command line and the API share it. It raises an exception
+instead of exiting, with one class per kind of problem, so a caller can tell
+them apart: UnsupportedFileError, UnreadableFileError and AIExtractionError.
+
 Steps:
   1. Read the text out of the file.
   2. AI call 1: extract the main resume. Sections the schema doesn't cover
@@ -10,6 +15,7 @@ Steps:
   4. Add the custom sections to the resume, in their original position.
   5. Remove empty values, check against the full schema, and save.
 """
+import io
 import json
 import re
 import sys
@@ -23,11 +29,11 @@ from dotenv import load_dotenv
 
 import columns
 
-load_dotenv()
+HERE = Path(__file__).parent
+load_dotenv(HERE / ".env")
 client = anthropic.Anthropic()
 
 MODEL = "claude-haiku-5-5"
-HERE = Path(__file__).parent
 EXTRACTION_INSTRUCTIONS = (HERE / "prompts" / "extraction.md").read_text(encoding="utf-8")
 CUSTOM_SECTION_INSTRUCTIONS = (HERE / "prompts" / "custom_section.md").read_text(encoding="utf-8")
 
@@ -37,6 +43,12 @@ with open(HERE / ".." / "resume.schema.json", encoding="utf-8") as f:
 BUILTIN_SECTIONS = ["summary", "education", "experience", "projects", "skills"]
 
 
+# ---------------------------------------------------------------------------
+# Schemas for the AI
+# ---------------------------------------------------------------------------
+
+# Rules the API can't enforce while generating. The full schema still checks
+# them afterward, in validate_resume.
 NOT_SUPPORTED = {"maxLength", "minLength", "maxItems", "uniqueItems", "pattern",
                  "$schema", "$id", "format"}
 
@@ -121,6 +133,9 @@ RESUME_WRAPPER = build_resume_wrapper()
 CUSTOM_SECTION_SCHEMA = build_custom_section_schema()
 
 
+# ---------------------------------------------------------------------------
+# Calling the AI
+# ---------------------------------------------------------------------------
 
 def ask_ai(instructions, content, schema):
     """Send one request and return the reply as a dictionary."""
@@ -156,6 +171,10 @@ def extract_custom_section(group):
     return ask_ai(CUSTOM_SECTION_INSTRUCTIONS, content, CUSTOM_SECTION_SCHEMA)
 
 
+# ---------------------------------------------------------------------------
+# Adding custom sections to the resume
+# ---------------------------------------------------------------------------
+
 def make_custom_id(heading, used_ids):
     """'Volunteer Experience' -> 'custom-volunteer-experience', unique."""
     slug = re.sub(r"[^a-z0-9]+", "-", heading.lower()).strip("-") or "section"
@@ -189,6 +208,8 @@ def add_custom_sections(resume, unplaced):
 
     for group in unplaced:
         heading = group["heading"].strip()
+        # Many resumes write headings in capitals ("VOLUNTEER EXPERIENCE"). The template
+        # styles section titles itself, so store them in normal capitalization.
         if heading.isupper():
             heading = heading.title()
         content = extract_custom_section(group)
@@ -199,6 +220,7 @@ def add_custom_sections(resume, unplaced):
 
         custom_sections.append({"id": section_id, "title": heading, **content})
 
+        # "after" is a built-in section name or an earlier unplaced heading.
         after = group["after"].strip()
         after = ids_by_heading.get(after.lower(), after.lower())
         insert_after(order, section_id, after)
@@ -207,8 +229,12 @@ def add_custom_sections(resume, unplaced):
     return added
 
 
+# ---------------------------------------------------------------------------
+# Cleaning and checking
+# ---------------------------------------------------------------------------
 
 def remove_empty(value):
+    """Remove the "" and [] values the AI used for fields that don't apply."""
     if isinstance(value, dict):
         cleaned = {k: remove_empty(v) for k, v in value.items()}
         return {k: v for k, v in cleaned.items() if v not in ("", [], {})}
@@ -221,6 +247,8 @@ def remove_empty(value):
 
 
 def validate_resume(resume):
+    """Check against the full schema, plus the rules JSON Schema can't express.
+    Returns a list of problems (empty when everything is fine)."""
     validator = jsonschema.Draft202012Validator(
         RESUME_SCHEMA, format_checker=jsonschema.FormatChecker())
     problems = []
@@ -243,17 +271,57 @@ def validate_resume(resume):
     return problems
 
 
-def extract_pdf_text(path):
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+class UnsupportedFileError(ValueError):
+    """The file is not a PDF or a Word (.docx) file."""
+
+
+class UnreadableFileError(ValueError):
+    """The file couldn't be read, or has no text in it, like a scanned image."""
+
+
+class AIExtractionError(RuntimeError):
+    """The AI call failed, or its answer couldn't be used."""
+
+
+# ---------------------------------------------------------------------------
+# Reading files
+# ---------------------------------------------------------------------------
+
+SUPPORTED_TYPES = (".pdf", ".docx")
+MIN_TEXT_LENGTH = 100
+
+
+def extract_pdf_text(source):
+    """Return the text of a PDF, reading two-column pages one column at a time.
+
+    Args:
+        source: A file path, or a file-like object such as io.BytesIO.
+
+    Returns:
+        The text of every page, joined with newlines.
+    """
     pages_text = []
-    with pdfplumber.open(path) as pdf:
+    with pdfplumber.open(source) as pdf:
         for page in pdf.pages:
             pages_text.append(columns.page_text(page))
     return "\n".join(pages_text)
 
 
-def extract_docx_text(path):
+def extract_docx_text(source):
+    """Return the text of a Word document: its paragraphs, then its tables.
+
+    Args:
+        source: A file path, or a file-like object such as io.BytesIO.
+
+    Returns:
+        The text, joined with newlines. Table cells are separated by " | ".
+    """
     parts = []
-    doc = docx.Document(path)
+    doc = docx.Document(source)
     for paragraph in doc.paragraphs:
         parts.append(paragraph.text)
     for table in doc.tables:
@@ -262,56 +330,106 @@ def extract_docx_text(path):
     return "\n".join(parts)
 
 
+def read_text(data, filename):
+    """Read the text out of an uploaded file's contents.
+
+    Args:
+        data: The file's contents, as bytes.
+        filename: The file's name, used only for its extension.
+
+    Returns:
+        The file's text.
+
+    Raises:
+        UnsupportedFileError: If the file isn't a PDF or a .docx file.
+        UnreadableFileError: If the file can't be opened, or has too little
+            text to be a resume (usually a scanned image).
+    """
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_TYPES:
+        raise UnsupportedFileError(
+            f"unsupported file type '{suffix or 'none'}': please upload a PDF or Word (.docx) file")
+    try:
+        if suffix == ".pdf":
+            text = extract_pdf_text(io.BytesIO(data))
+        else:
+            text = extract_docx_text(io.BytesIO(data))
+    except Exception as e:
+        raise UnreadableFileError(f"the file could not be read ({e})") from e
+    if len(text.strip()) < MIN_TEXT_LENGTH:
+        raise UnreadableFileError("no readable text found. This may be a scanned image; "
+                                  "please upload a text-based PDF or a Word file.")
+    return text
+
+
+def extract_from_file(data, filename):
+    """Turn an uploaded resume into resume JSON.
+
+    Args:
+        data: The file's contents, as bytes.
+        filename: The file's name, used only for its extension.
+
+    Returns:
+        A dictionary with three keys: "resume", the resume as a dictionary;
+        "added_sections", the headings that were added as custom sections;
+        and "warnings", ways the resume doesn't fully match the schema. The
+        resume is returned even when there are warnings, so the person can fix
+        it in the app.
+
+    Raises:
+        UnsupportedFileError: If the file isn't a PDF or a .docx file.
+        UnreadableFileError: If the file can't be read or has no text.
+        AIExtractionError: If the AI call fails or its answer can't be used.
+    """
+    text = read_text(data, filename)
+    try:
+        answer = extract_resume(text)
+        resume = remove_empty(answer["resume"])
+        unplaced = [group for group in answer["unplaced"] if group["lines"]]
+        added = add_custom_sections(resume, unplaced)
+        resume = remove_empty(resume)
+    except Exception as e:
+        raise AIExtractionError(f"extraction failed ({e})") from e
+    return {"resume": resume, "added_sections": added, "warnings": validate_resume(resume)}
+
+
+# ---------------------------------------------------------------------------
+# Command line
+# ---------------------------------------------------------------------------
+
 def fail(message):
+    """Print an error and exit. Only the command line uses this."""
     print(f"error: {message}", file=sys.stderr)
     sys.exit(1)
 
 
 def main():
+    """Run extraction from the command line: read a file, extract it, and save the JSON."""
     if len(sys.argv) != 3:
         fail("usage: py extract.py <resume.pdf or resume.docx> <output.json>")
 
     input_path, output_path = sys.argv[1], sys.argv[2]
 
-    if not Path(input_path).exists():
-        fail(f"file not found: {input_path}")
-
-    suffix = Path(input_path).suffix.lower()
-    if suffix not in (".pdf", ".docx"):
-        fail(f"unsupported file type '{suffix}': please upload a PDF or Word (.docx) file")
+    try:
+        data = Path(input_path).read_bytes()
+    except OSError as e:
+        fail(f"could not open {input_path} ({e})")
 
     try:
-        if suffix == ".pdf":
-            text = extract_pdf_text(input_path)
-        else:
-            text = extract_docx_text(input_path)
-    except Exception as e:
-        fail(f"could not read {input_path} ({e})")
-
-    if len(text.strip()) < 100:
-        fail("no readable text found. This may be a scanned image; "
-             "please upload a text-based PDF or a Word file.")
-
-    try:
-        data = extract_resume(text)
-        resume = remove_empty(data["resume"])
-        unplaced = [group for group in data["unplaced"] if group["lines"]]
-        added = add_custom_sections(resume, unplaced)
-        resume = remove_empty(resume)
-    except Exception as e:
-        fail(f"extraction failed ({e})")
+        result = extract_from_file(data, input_path)
+    except (UnsupportedFileError, UnreadableFileError, AIExtractionError) as e:
+        fail(str(e))
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(resume, f, indent=2, ensure_ascii=False)
+        json.dump(result["resume"], f, indent=2, ensure_ascii=False)
     print(f"Wrote: {output_path}")
 
-    if added:
-        print("Added as custom sections: " + ", ".join(added))
+    if result["added_sections"]:
+        print("Added as custom sections: " + ", ".join(result["added_sections"]))
 
-    problems = validate_resume(resume)
-    if problems:
+    if result["warnings"]:
         print("Warning: the result doesn't fully match the schema:", file=sys.stderr)
-        for problem in problems:
+        for problem in result["warnings"]:
             print(f"  - {problem}", file=sys.stderr)
 
 
