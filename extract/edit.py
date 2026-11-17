@@ -165,24 +165,18 @@ def change_problems(change, resume, profile, request, limit):
     Returns:
         A list of problems, phrased so the AI can act on them.
     """
+    structural = structure_problems(change, resume)
+    if structural or change["action"] == "set_section_order":
+        return structural
+
     action, path, text = change["action"], change["path"], change["text"]
     label = f"{action} at {path}" if path else action
-
-    if action == "set_section_order":
-        if sorted(change["order"]) != sorted(resume["section_order"]):
-            return [f"{label}: the order must contain exactly these sections: "
-                    f"{', '.join(resume['section_order'])}"]
-        return []
-
-    if not PATH_RULES[action].match(path) or get_item(resume, path) is None:
-        return [f"{label}: there is no matching item at this path"]
 
     if action in ("remove_bullet", "remove_project"):
         return []
 
     if action == "remove_skill":
-        names = [name.lower() for name in get_item(resume, path)["items"]]
-        return [] if text.lower() in names else [f"{label}: there is no skill called '{text}' in this group"]
+        return []
 
     profile_content = json.dumps(profile_to_resume(profile), ensure_ascii=False)
     if action == "add_skill":
@@ -200,6 +194,45 @@ def change_problems(change, resume, profile, request, limit):
     for tell in style_problems(text):
         problems.append(f"{label}: contains '{tell}', which the style guide bans")
     return problems
+
+
+def structure_problems(change, resume):
+    """Check that a change points at something real in the resume.
+
+    This is the part of the checks that doesn't need the profile or the
+    request, so it can also run when someone applies changes later.
+
+    Args:
+        change: One change.
+        resume: The resume the change applies to.
+
+    Returns:
+        A list of problems; empty when the change makes sense for this resume.
+    """
+    action, path, text = change.get("action"), change.get("path", ""), change.get("text", "")
+    label = f"{action} at {path}" if path else str(action)
+
+    if action not in ACTIONS:
+        return [f"'{action}' isn't a change we know how to make"]
+
+    if action == "set_section_order":
+        if sorted(change.get("order", [])) != sorted(resume["section_order"]):
+            return [f"{label}: the order must contain exactly these sections: "
+                    f"{', '.join(resume['section_order'])}"]
+        return []
+
+    if not PATH_RULES[action].match(path) or get_item(resume, path) is None:
+        return [f"{label}: there is no matching item at this path"]
+
+    if action in ("edit_bullet", "add_bullet", "add_skill") and not text.strip():
+        return [f"{label}: the new text is empty"]
+
+    if action == "remove_skill":
+        names = [name.lower() for name in get_item(resume, path)["items"]]
+        if text.lower() not in names:
+            return [f"{label}: there is no skill called '{text}' in this group"]
+
+    return []
 
 
 def find_problems(answer, resume, profile, request, limit):
@@ -357,6 +390,104 @@ def rebuild(resume_path, pages):
         print(f"Warning: the resume is now {report['pages']} pages, over the limit of {pages}", file=sys.stderr)
 
 
+class EditError(RuntimeError):
+    """The AI call failed, or we couldn't use what it sent back."""
+
+
+class InvalidChangeError(ValueError):
+    """A change doesn't fit the resume, or applying it would break the resume."""
+
+
+def propose_edits(resume, profile, request, lines=2):
+    """Ask the AI for changes to a resume, and check every one of them.
+
+    Nothing is changed here: the caller shows the proposed changes to the
+    person, and applies the ones they accept with apply_edits.
+
+    Args:
+        resume: The tailored resume to edit.
+        profile: The person's profile, where facts for new bullets come from.
+        request: What the person asked for, in their own words.
+        lines: Lines per bullet on the page (1 or 2), for the length check.
+
+    Returns:
+        A dictionary with:
+            "message": the AI's short note to the person.
+            "changes": the changes that passed every check.
+            "descriptions": a plain-words description of each of those changes.
+            "skipped": changes that failed the checks, each with its problems.
+
+    Raises:
+        EditError: If the AI call fails.
+    """
+    limit = CHARS_FOR_LINES[lines]
+    content = (f"<request>\n{request}\n</request>\n\n"
+               f"<settings>\nEach bullet: at most {limit} characters. One line holds about "
+               f"{CHARS_FOR_LINES[1]} characters.\n</settings>\n\n"
+               f"<resume>\n{resume_outline(resume)}\n</resume>\n\n"
+               f"<profile>\n{profile_outline(profile)}\n</profile>")
+    messages = [{"role": "user", "content": content}]
+
+    try:
+        answer = ask_for_changes(messages)
+        problems = find_problems(answer, resume, profile, request, limit)
+        for _ in range(FIX_ROUNDS):
+            if not problems:
+                break
+            messages += [
+                {"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)},
+                {"role": "user", "content": "The checks found these problems. Return the full answer again "
+                                            "with them fixed:\n- " + "\n- ".join(problems)},
+            ]
+            answer = ask_for_changes(messages)
+            problems = find_problems(answer, resume, profile, request, limit)
+    except Exception as e:
+        raise EditError(f"something went wrong while editing your resume ({e})") from e
+
+    good, skipped = [], []
+    for change in answer["changes"]:
+        change_issues = change_problems(change, resume, profile, request, limit)
+        if change_issues:
+            skipped.append({"change": change, "problems": change_issues})
+        else:
+            good.append(change)
+
+    if good or not skipped:
+        message = answer["message"]
+    else:
+        message = "We couldn't make the changes you asked for without adding facts that aren't in your resume."
+    return {
+        "message": message,
+        "changes": good,
+        "descriptions": [describe(change, resume) for change in good],
+        "skipped": skipped,
+    }
+
+
+def apply_edits(resume, changes):
+    """Apply changes the person accepted, and check the result.
+
+    Args:
+        resume: The resume to change.
+        changes: The changes to apply, usually from propose_edits.
+
+    Returns:
+        The edited resume.
+
+    Raises:
+        InvalidChangeError: If a change doesn't fit this resume, or the edited
+            resume would no longer be valid.
+    """
+    problems = [problem for change in changes for problem in structure_problems(change, resume)]
+    if problems:
+        raise InvalidChangeError("; ".join(problems))
+    edited = apply_changes(resume, changes)
+    invalid = validate_resume(edited)
+    if invalid:
+        raise InvalidChangeError("the edited resume wouldn't be valid: " + "; ".join(invalid))
+    return edited
+
+
 def main():
     """Run a chat edit from the command line: ask, check, confirm, save, and rebuild."""
     parser = argparse.ArgumentParser(description="Edit a tailored resume with a request in plain words.")
@@ -391,42 +522,22 @@ def main():
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    limit = CHARS_FOR_LINES[args.lines]
-    request = (f"<request>\n{args.request}\n</request>\n\n"
-               f"<settings>\nEach bullet: at most {limit} characters. One line holds about "
-               f"{CHARS_FOR_LINES[1]} characters.\n</settings>\n\n"
-               f"<resume>\n{resume_outline(resume)}\n</resume>\n\n"
-               f"<profile>\n{profile_outline(profile)}\n</profile>")
-    messages = [{"role": "user", "content": request}]
-
     try:
-        answer = ask_for_changes(messages)
-        problems = find_problems(answer, resume, profile, args.request, limit)
-        for _ in range(FIX_ROUNDS):
-            if not problems:
-                break
-            messages += [
-                {"role": "assistant", "content": json.dumps(answer, ensure_ascii=False)},
-                {"role": "user", "content": "The checks found these problems. Return the full answer again "
-                                            "with them fixed:\n- " + "\n- ".join(problems)},
-            ]
-            answer = ask_for_changes(messages)
-            problems = find_problems(answer, resume, profile, args.request, limit)
-    except Exception as e:
-        print(f"error: editing failed ({e})", file=sys.stderr)
+        proposal = propose_edits(resume, profile, args.request, args.lines)
+    except EditError as e:
+        print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    good = [c for c in answer["changes"] if not change_problems(c, resume, profile, args.request, limit)]
-    rejected = [c for c in answer["changes"] if c not in good]
-    if good or not rejected:
-        print(answer["message"])
-    for change in rejected:
+    good = proposal["changes"]
+    print(proposal["message"])
+    for skipped in proposal["skipped"]:
+        change = skipped["change"]
         print(f"Skipped a suggested change that failed the checks: {change['action']} at {change['path']}",
               file=sys.stderr)
-        for problem in change_problems(change, resume, profile, args.request, limit):
+        for problem in skipped["problems"]:
             print(f"  - {problem}", file=sys.stderr)
     if not good:
-        print("No changes were made." if rejected else "No changes to make.")
+        print("No changes were made." if proposal["skipped"] else "No changes to make.")
         return
 
     print()

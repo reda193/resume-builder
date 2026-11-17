@@ -12,7 +12,14 @@ For each requirement, list the ids of every bullet in the profile that shows evi
 - "logged and tracked bugs", "triaged incidents" and writing test cases are evidence of testing and debugging.
 - Building or running a pipeline is evidence of CI/CD, whatever the tool.
 
-A requirement with no evidence is a gap. Your choices in the next steps must follow from this map.
+Look everywhere in the profile, including education and custom sections like volunteer work, certifications and awards. Those are marked "evidence only": you may cite their ids in the map, but they are copied onto the resume as they are, so never pick them as bullets.
+
+How strong the evidence is:
+- A bullet showing the person did it is a strong match.
+- A skill in their skills list, with no bullet showing it in use, is a partial match. It is still something they have, never a gap.
+- A requirement with no bullet and no skill is a gap.
+
+Your choices in the next steps must follow from this map.
 
 ## Step 2: Choose
 
@@ -21,7 +28,7 @@ A requirement with no evidence is a gap. Your choices in the next steps must fol
 - Include every job from the profile, but give fewer bullets to jobs that matter less to this posting. A job may have zero bullets if nothing in it is relevant.
 - Never pick more bullets per job, or more projects, than the settings allow.
 - Rank every bullet you pick across the whole resume: 1 is the strongest match for this job. Ranks decide what gets cut first if the resume is too long, so rank honestly.
-- section_order: put the strongest sections first. For most people that is experience first; for students and new graduates with little experience, education or projects may come first. Use only these names: education, experience, projects, skills, and the custom section ids in the profile.
+- section_order: put the strongest sections first. For most people that is experience first; for students and new graduates with little experience, education or projects may come first. A custom section that is strong evidence for this posting (like volunteer teaching for a teaching-related job) belongs before less relevant sections. Use only these names: education, experience, projects, skills, and the custom section ids in the profile.
 
 ### Skills
 
@@ -42,19 +49,11 @@ Only leave out skills clearly unrelated to the job. Only use skill ids from the 
 - Each bullet must fit the character limit in the settings. If the original is longer, condense it: keep the action, the tools, and the result; drop the least important detail.
 - Follow the writing style guide below. No em-dashes, no "leverage", no "seamless", no throat-clearing.
 
-## Step 4: Cover letter
+## Step 4: Notes
 
-- Three to four short paragraphs: who they are and the role, why they fit, one specific line about this company drawn from the posting, and a warm close.
-- Build the "why they fit" paragraph from the requirements map: lead with their strongest matches, especially the ones closest to the job's day-to-day duties, with two or three specific accomplishments from the profile.
-- Only claim experience the profile shows. For something the posting asks for that the profile lacks, show honest interest in learning it instead of claiming it.
-- Be confident about what they have done. Mention a gap once, briefly and positively ("I haven't used GCP yet and look forward to learning it"), without apologizing for being early in their career.
-- Warm, eager, and humble, in the first person. No exclamation marks. Follow the writing style guide.
-- Fill in company and role from the posting. Leave team empty if the posting doesn't name one.
-
-## Step 5: Notes
-
-- strong_matches: requirements from your map that have strong evidence, each with a few words naming the evidence.
-- gaps: requirements from your map with no evidence, so the person knows what to prepare for. A requirement with evidence is never a gap.
+- strong_matches: requirements with a bullet as evidence, each with a few words naming that evidence.
+- partial_matches: requirements backed only by a listed skill, so the person knows to be ready to give an example in an interview.
+- gaps: requirements with no bullet and no skill, so the person knows what to prepare for. A requirement with any evidence is never a gap.
 
 ## Safety
 
